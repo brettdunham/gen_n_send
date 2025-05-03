@@ -19,7 +19,7 @@ os.makedirs(output_dir, exist_ok=True)
 template_text = """
 {{date}}
 
-{{firm_name}} {{firm_type}}
+{{recipient_name}}
 {{address_1}}
 {{address_2}}
 {% if address_3 %}{{address_3}}{% endif %}
