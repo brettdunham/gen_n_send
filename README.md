@@ -7,4 +7,4 @@ This project is provided "as is" for general informational and productivity purp
 
 By using this script, you acknowledge and accept these terms.
 
-Recommended column titles: recipient_name, recipient_email, address_1, address_2, address_3. (Additional data points may be included for use in the body text as needed.)
+Recommended column titles: recipient_name, recipient_email, address_1, address_2, address_3. (Additional data points may be included for use in body text as needed.)
