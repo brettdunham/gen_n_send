@@ -1,0 +1,110 @@
+import pandas as pd
+from jinja2 import Template
+from fpdf import FPDF
+from datetime import datetime
+from docx import Document
+import os
+
+# Load data
+excel_path = '../example/sheet.xlsx'
+data = pd.read_excel(excel_path)
+
+# File paths
+today_date = datetime.now().strftime('%B %-d, %Y')
+body_text_path = '../example/body_text.docx'
+signature_path = '../example/images/signature.png'
+output_dir = '../example/pdfs/'
+os.makedirs(output_dir, exist_ok=True)
+
+template_text = """
+{{date}}
+
+{{firm_name}} {{firm_type}}
+{{address_1}}
+{{address_2}}
+{% if address_3 %}{{address_3}}{% endif %}
+
+Re: {{subject_line}}
+
+Dear {{recipient_name}},
+
+[BODY_TEXT]
+
+Sincerely,
+
+[SIGNATURE]
+"""
+
+template = Template(template_text)
+
+def load_body_text_from_docx(path, context):
+    if not os.path.exists(path):
+        return ["[Missing body text]"]
+    doc = Document(path)
+    paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    return [Template(p).render(**context) for p in paragraphs]
+
+def create_pdf(text, filename, body_text_lines, signature_path):
+    pdf = FPDF()
+    pdf.add_page()
+
+    # Letter margins
+    pdf.set_margins(25.4, 30, 25.4)
+    pdf.set_auto_page_break(auto=True, margin=25.4)
+    pdf.set_font("Times", size=12)
+
+    # Top spacing before date
+    pdf.ln(15)
+
+    raw_lines = text.split('\n')
+    cleaned_lines = []
+    prev_blank = False
+    for line in raw_lines:
+        if line.strip() == '':
+            if not prev_blank:
+                cleaned_lines.append('')
+                prev_blank = True
+        else:
+            cleaned_lines.append(line.strip())
+            prev_blank = False
+
+    for line in cleaned_lines:
+        if line.strip() == '[BODY_TEXT]':
+            for para in body_text_lines:
+                pdf.multi_cell(0, 6.25, para, align="L")
+                pdf.ln(4)  # Paragraph spacing
+            pdf.ln(0)  # Space after the entire body block
+        elif line.strip() == '[SIGNATURE]':
+            if os.path.exists(signature_path):
+                pdf.image(signature_path, w=60)
+                pdf.ln(4)
+        else:
+            pdf.multi_cell(0, 5.5, line, align="L")
+
+    pdf.set_font("Times", "B", size=12)
+    pdf.cell(0, 4, "First. M. Last", ln=True)
+    
+    pdf.output(filename)
+
+def sanitize_text(text):
+    replacements = {
+        '\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"',
+        '\u2014': '-', '\u2013': '-', '\u2026': '...',
+        '\xa0': ' ', '\u00a9': '(c)', '\u2122': '(TM)',
+    }
+    for orig, repl in replacements.items():
+        text = text.replace(orig, repl)
+    return text
+
+for idx, row in data.iterrows():
+    row_dict = {
+        key: ('' if pd.isna(val) or str(val).strip().lower() == 'nan' else str(val).strip())
+        for key, val in row.to_dict().items()
+    }
+    context = {**row_dict, "date": today_date}
+    body_text_lines = [sanitize_text(p) for p in load_body_text_from_docx(body_text_path, context)]
+
+    rendered_text = sanitize_text(template.render(**row_dict, date=today_date))
+    filename = os.path.join(output_dir, f"{row['recipient_name'].replace(' ', '_')}.pdf")
+    create_pdf(rendered_text, filename, body_text_lines, signature_path)
+    print(f"Generated: {filename}")
