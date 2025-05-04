@@ -1,0 +1,119 @@
+import pandas as pd
+from pdfrw import PdfReader, PdfWriter, PdfDict
+from string import Template
+from docx import Document
+from appscript import app, k
+import os
+
+# Load data
+excel_path = '../example/sheet.xlsx'
+df = pd.read_excel(excel_path)
+
+# File paths
+form_path = '../example/forms/form.pdf'
+output_folder = '../example/attachments/'
+filename_column = 'attachment'
+body_path = '../example/body_text.docx'
+
+# Ensure output folder exists
+os.makedirs(output_folder, exist_ok=True)
+
+# Fillable PDF function
+def fill_pdf_form(form_path, output_pdf_path, data_dict):
+    form = PdfReader(form_path)
+    for page in form.pages:
+        annotations = page['/Annots']
+        if annotations:
+            for annotation in annotations:
+                if annotation['/Subtype'] == '/Widget' and annotation.get('/T'):
+                    field_name = annotation['/T'][1:-1]
+                    if field_name in data_dict:
+                        field_value = data_dict[field_name]
+                        if pd.notna(field_value):
+                            annotation.update(
+                                PdfDict(V=str(field_value), Ff=1)
+                            )
+    PdfWriter(output_pdf_path, trailer=form).write()
+
+# Fill PDFs
+for index, row in df.iterrows():
+    data_dict = row.to_dict()
+    recipient_name = row['recipient_name'].replace(' ', '_')
+    output_filename = f"{recipient_name}.pdf"
+    output_pdf_path = os.path.join(output_folder, output_filename)
+    
+    fill_pdf_form(form_path, output_pdf_path, data_dict)
+    df.at[index, filename_column] = output_filename
+
+print("PDF forms filled and saved successfully.")
+
+# Load email body
+def get_body_from_docx(path):
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Body Word document not found: {path}")
+    doc = Document(path)
+    return "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
+
+shared_body_text = get_body_from_docx(body_path)
+
+# Email template
+template_text = """
+Dear ${recipient_name},
+
+${body_text}
+
+Sincerely,
+
+First M. Last
+firstmlast@email.com
+"""
+template = Template(template_text)
+
+# Email setup
+outlook = app('Microsoft Outlook')
+
+def send_email(recipient, cc_recipient, subject, body, attachment_path):
+    new_message = outlook.make(
+        new=k.outgoing_message,
+        with_properties={
+            k.subject: subject,
+            k.content: body
+        }
+    )
+
+    new_message.make(
+        new=k.to_recipient,
+        with_properties={k.email_address: {k.address: recipient}}
+    )
+    
+    if cc_recipient:
+        new_message.make(
+            new=k.cc_recipient,
+            with_properties={k.email_address: {k.address: cc_recipient}}
+        )
+    
+    if attachment_path and os.path.exists(attachment_path):
+        new_message.make(
+            new=k.attachment,
+            with_properties={k.file: attachment_path}
+        )
+
+    new_message.send()
+
+# Send emails
+for index, row in df.iterrows():
+    recipient = row['email']
+    cc_recipient = row.get('cc', None)
+    subject = row['subj']
+    
+    body = template.substitute(
+        recipient_name=row['recipient_name'],
+        body_text=shared_body_text
+    )
+    
+    attachment_filename = row[filename_column]
+    attachment_path = os.path.join(output_folder, attachment_filename)
+
+    send_email(recipient, cc_recipient, subject, body, attachment_path)
+
+print("Emails sent successfully!")
